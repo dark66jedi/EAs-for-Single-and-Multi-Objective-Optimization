@@ -40,15 +40,19 @@ toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 
 # the goal ('fitness') function to be maximized
 def evalCost(individual):
-    sum = 0.0
+    sumCost = 0.0
 
     for i in range(len(individual[0])):
-        if i == 0:
-            sum += float(costM[individual[1][i]][individual[0][-1]][individual[0][i]])
+        try:
+            if i == 0:
+                sumCost += float(costM[individual[1][i]][individual[0][-1]][individual[0][i]])
 
-        else:
-            sum += float(costM[individual[1][i]][individual[0][i-1]][individual[0][i]])
-    return sum,
+            else:
+                sumCost += float(costM[individual[1][i]][individual[0][i-1]][individual[0][i]])
+        except:
+            return float('inf'),
+
+    return sumCost,
 
 #----------
 # Operator registration
@@ -147,6 +151,7 @@ def main():
         print("-- Generation %i --" % g)
         
         # Select the next generation individuals
+        offspring = toolbox.select(pop, popN)
         offspring = toolbox.select(pop, popN // 3 )
         # Clone the selected individuals
         offspring = list(map(toolbox.clone, offspring))
@@ -187,7 +192,7 @@ def main():
         #print("  Evaluated %i total individuals" % e)
         
         # The population is entirely replaced by the offspring
-        pop[:] = offspring
+        pop[popN//3:] = offspring
         
         # Gather all the fitnesses in one list and print the stats
         fits = [ind.fitness.values[0] for ind in pop]

@@ -47,14 +47,54 @@ def evalCost(individual):
     sumTime = 0.0
 
     for i in range(len(individual[0])):
-        if i == 0:
-            sumCost += float(costM[individual[1][i]][individual[0][-1]][individual[0][i]])
-            sumTime += float(timeM[individual[1][i]][individual[0][-1]][individual[0][i]])
+        try:
+            if i == 0:
+                sumCost += float(costM[individual[1][i]][individual[0][-1]][individual[0][i]])
+                sumTime += float(timeM[individual[1][i]][individual[0][-1]][individual[0][i]])
 
-        else:
-            sumCost += float(costM[individual[1][i]][individual[0][i-1]][individual[0][i]])
-            sumTime += float(timeM[individual[1][i]][individual[0][i-1]][individual[0][i]])
+            else:
+                sumCost += float(costM[individual[1][i]][individual[0][i-1]][individual[0][i]])
+                sumTime += float(timeM[individual[1][i]][individual[0][i-1]][individual[0][i]])
+        except:
+            return float('inf'), float('inf')
+
     return sumCost, sumTime
+
+def calculate_hypervolume(pareto_front, max_values):
+    """
+    Calculate the hypervolume of a Pareto front.
+
+    Parameters:
+    - pareto_front: A list or array of points on the Pareto front (each point should be a tuple of two values).
+    - max_values: A tuple containing the maximum values for the two functions to be minimized.
+
+    Returns:
+    - Hypervolume value.
+    """
+    # Ensure pareto_front is a numpy array for easier manipulation
+    pareto_front = np.array(pareto_front)
+
+    # Initialize hypervolume
+    hypervolume = 0.0
+
+    # Sort Pareto front points based on the first objective (minimization)
+    sorted_front = pareto_front[np.argsort(pareto_front[:, 0])]
+
+    # Compute the hypervolume using the "step" method
+    previous_x = 0
+    for point in sorted_front:
+        x, y = point
+        # Calculate width and height of the rectangle
+        width = x - previous_x
+        height = max_values[1] - y
+        
+        # Update hypervolume
+        hypervolume += width * height
+        
+        # Update previous_x to current x
+        previous_x = x
+
+    return hypervolume
 
 #----------
 # Operator registration
@@ -81,16 +121,16 @@ toolbox.register("select", tools.selNSGA2)
 def main():
     #random.seed(64)
 
-    # create an initial population of 300 individuals (where
-    # each individual is a list of integers)
     argList = sys.argv[1:]
     options = "hf:n:c:"
     csvOpt = ""
     popN = 100
     global cityN
     cityN = 30
+    limits = [0.0, 0.0]
+
+    #Gestão de argumentos de entrada
     try:
-        
         arguments, values = getopt.getopt(argList, options, "")
         for arg, value in arguments:
             if arg == "-h":
@@ -106,6 +146,8 @@ def main():
     except getopt.error as err:
         print(str(err))
 
+    #Matris de custo
+    #   Lista de 3 matrizes cityN*cityN correspondentes aos ficheiros costtrain.csv, costplane.csv e costbus.csv
     global costM 
     costM = [[], [], []]
     for i, j in enumerate(["costtrain.csv", "costplane.csv", "costbus.csv"]):
@@ -120,7 +162,12 @@ def main():
                     break
                 else:
                     costM[i].append(row[1:cityN +1])
-
+                    for l in row[1:cityN+1]:
+                        try:
+                            limits[0] = max(float(l), limits[0])
+                        except: continue
+    
+    #Igual ao de cima mas para tempo
     global timeM 
     timeM = [[], [], []]
     for i, j in enumerate(["timetrain.csv", "timeplane.csv", "timebus.csv"]):
@@ -135,6 +182,15 @@ def main():
                     break
                 else:
                     timeM[i].append(row[1:cityN +1])
+                    for l in row[1:cityN+1]:
+                        try:
+                            limits[1] = max(float(l), limits[1])
+                        except: continue
+    
+    #Limits para calculo de Hypervolume
+    limits[0] = limits[0]*cityN
+    limits[1] = limits[1]*cityN
+    print(limits)
 
     pop = toolbox.population(n=popN)
 
@@ -142,7 +198,7 @@ def main():
     #       are crossed
     #
     # MUTPB is the probability for mutating an individual
-    CXPB, MUTPB1, MUTPB2 = 0.7, 0.2, 0.2
+    CXPB, MUTPB1, MUTPB2 = 0.5, 0.2, 0.2
     
     print("Start of evolution")
     
@@ -152,12 +208,7 @@ def main():
     for ind, fit in zip(pop, fitnesses):
         ind.fitness.values = fit
         e += 1
-    
-    #print("  Evaluated %i individuals" % len(pop))
-    #print("  Evaluated %i total individuals" % e)
 
-    # Extracting all the fitnesses of 
-    fits = [ind.fitness.values[0] for ind in pop]
 
     # Variable keeping track of the number of generations
     g = 0
@@ -167,22 +218,28 @@ def main():
     pareto.update(pop)
 
     #  Plot the initial Pareto front
-    def plot_pareto_front(pareto_front):
+    def plot_pareto_front(pareto_front, non_dominated):
         plt.figure(figsize=(8, 6))
         plt.scatter([ind.fitness.values[0] for ind in pareto_front],
                     [ind.fitness.values[1] for ind in pareto_front],
                     c='blue', label='Pareto Front')
+        plt.scatter([ind.fitness.values[0] for ind in non_dominated],
+                    [ind.fitness.values[1] for ind in non_dominated],
+                    c='red', label='Current pop Pareto Front')
         plt.title('Pareto Front')
-        plt.xlabel('Objective 1 (f1)')
-        plt.ylabel('Objective 2 (f2)')
+        plt.xlabel('Cost (f1)')
+        plt.ylabel('Time (f2)')
         plt.legend()
         plt.grid()
         plt.show(block=False)
         plt.pause(1)
 
 
+    # Calculate hypervolume for the current generation
+    non_dominated = tools.sortNondominated(pop, len(pop), first_front_only=True)[0]
     # Plot initial Pareto front
-    plot_pareto_front(pareto)
+    plot_pareto_front(pareto, non_dominated)
+    plt.close('all')
 
     # Begin the evolution
     while  e < 10000:
@@ -191,7 +248,9 @@ def main():
         print("-- Generation %i --" % g)
         
         # Select the next generation individuals
-        offspring = toolbox.select(pop, popN // 3 )
+        pop = toolbox.select(pop, popN )
+        offspring = toolbox.select(pop, popN // 2 )
+
         # Clone the selected individuals
         offspring = list(map(toolbox.clone, offspring))
     
@@ -231,22 +290,38 @@ def main():
         #print("  Evaluated %i total individuals" % e)
         
         # The population is entirely replaced by the offspring
-        pop[:] = offspring
+        pop[popN//2:] = offspring
         
         #pareto front
         pareto.update(pop)
-        plot_pareto_front(pareto)
-        plt.close('all')
+
+        
+        # Calculate hypervolume for the current generation
+        non_dominated = tools.sortNondominated(pop, len(pop), first_front_only=True)[0]
+        hv = calculate_hypervolume([ind.fitness.values for ind in non_dominated], limits)
+        hv_pareto = calculate_hypervolume([ind.fitness.values for ind in pareto], limits)
+        if g%10 == 0:
+            # Plot initial Pareto front
+            plot_pareto_front(pareto, non_dominated)
+            plt.close('all')
+        print(f"Generation {g + 1}: Hypervolume = {hv}")
+        print(f"Generation {g + 1}: Hypervolume Hall of Fame= {hv_pareto}")
+
         
 
     print("-- End of (successful) evolution --")
     
     
-    plot_pareto_front(pareto)
+    # Calculate hypervolume for the current generation
+    non_dominated = tools.sortNondominated(pop, len(pop), first_front_only=True)[0]
+    hv = calculate_hypervolume([ind.fitness.values for ind in non_dominated], limits)
+    hv_pareto = calculate_hypervolume([ind.fitness.values for ind in pareto], limits)
+    # Plot initial Pareto front
+    plot_pareto_front(pareto, non_dominated)
     input()
 
     for best_ind in pareto: 
-        print("Best individual is %s, %s" % ([(cities[i] + "-" + ["train", "plane", "bus"][j]) for i,j in zip(best_ind[0], best_ind[1])], best_ind.fitness.values))
+        print("Best individual is %s, %s \n\n\n" % ([(cities[i] + "-" + ["train", "plane", "bus"][j]) for i,j in zip(best_ind[0], best_ind[1])], best_ind.fitness.values))
 
 if __name__ == "__main__":
     main()
